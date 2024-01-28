@@ -1,0 +1,6 @@
+= Flag - command line interface
+
+> ⚠️ This package is a work in progress, the design is not final. Feedback is appreciated.
+
+* See flag_demo for usage
+* See flag_test for tests
