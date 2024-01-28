@@ -2,5 +2,5 @@
 
 > ⚠️ This package is a work in progress, the design is not final. Feedback is appreciated.
 
-* See https://github.com/leidegre/odin-pkg/tree/master/flag_demo[flag_demo] for usage
-* See https://github.com/leidegre/odin-pkg/tree/master/flag_test[flag_test] for tests
+* See https://github.com/leidegre/odin-pkg/blob/master/flag_demo/flag_demo.odin[flag_demo] for usage
+* See https://github.com/leidegre/odin-pkg/blob/master/flag_test/flag_test.odin[flag_test] for tests
