@@ -1,6 +1,6 @@
-= Flag - command line interface
+= flag - a command line parser
 
 > ⚠️ This package is a work in progress, the design is not final. Feedback is appreciated.
 
-* See flag_demo for usage
-* See flag_test for tests
+* See https://github.com/leidegre/odin-pkg/tree/master/flag_demo[flag_demo] for usage
+* See https://github.com/leidegre/odin-pkg/tree/master/flag_test[flag_test] for tests
