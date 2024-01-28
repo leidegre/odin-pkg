@@ -4,3 +4,29 @@
 
 * See https://github.com/leidegre/odin-pkg/blob/master/flag_demo/flag_demo.odin[flag_demo] for usage
 * See https://github.com/leidegre/odin-pkg/blob/master/flag_test/flag_test.odin[flag_test] for tests
+
+This package provides utilities for populating existing data structures with data from the command line. The package is somewhat opinionated about how commands and flags have to be expressed but I'd argue it a good thing.
+
+== Example
+
+[source,odin]
+----
+Metasyntactic_Variable :: enum {
+    Foo,
+    Bar,
+    Baz,
+}
+Metasyntactic_Variables :: bit_set[Metasyntactic_Variable]
+
+meta_vars: Metasyntactic_Variables
+
+flags := []flag.Flag_Dummy{
+    flag.Flag_Dummy{flag.bind_bit_set(&meta_vars), "meta-var", "", {}}
+}
+
+flag.parse_args_flags(flags, []string{"", "-meta-var:Foo", "-meta-var:Bar"})
+
+fmt.println(meta_vars) // bit_set[Metasyntactic_Variables]{Foo, Bar}
+----
+
+In the above example we bind the flag `-meta-var` to `meta_vars` of type `bit_set`. `flag.Flag_Dummy` is used instead of `flag.Flag` since the latter is a parapoly type which expects a command kind. Command kinds are useful but you don't always need them. The Odin compiler has several command kinds like `run`, `build`, `check`, etc. Not all flags are supported by all commands but many are. You'll find a more fleshed out example of this in the https://github.com/leidegre/odin-pkg/blob/master/flag_demo/flag_demo.odin[flag_demo].
