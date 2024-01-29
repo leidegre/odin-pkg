@@ -15,17 +15,18 @@ Command :: struct($Enum_Type: typeid) where intrinsics.type_is_enum(Enum_Type) {
 }
 
 // just Bindings
-Flag_Bindings :: union {
-	Flag_Binding_Bool,
-	Flag_Binding_Int,
-	Flag_Binding_String,
-	Flag_Binding_Map,
-	Flag_Parser,
+Bindings :: union {
+	Binding_Boolean,
+	Binding_Integer,
+	Binding_String,
+	Binding_Dynamic_Array, // [dynamic]string
+	Binding_Map, // map[string]string
+	Binding_Enum,
 }
 
 // -name:argument
 Flag :: struct($Enum_Type: typeid) where intrinsics.type_is_enum(Enum_Type) {
-	var:         Flag_Bindings, // binding
+	var:         Bindings, // binding
 	name:        string,
 	description: string,
 	commands:    bit_set[Enum_Type], // supported_commands? has?
@@ -38,7 +39,7 @@ Dummy :: enum {
 
 Flag_Dummy :: Flag(Dummy)
 
-make_flag :: proc(var: Flag_Bindings, name: string, description: string = "") -> Flag_Dummy {
+make_flag :: proc(var: Bindings, name: string, description: string = "") -> Flag_Dummy {
 	return {var, name, description, {}}
 }
 
@@ -234,7 +235,7 @@ _parse_args_commands :: proc(
 				}
 
 				if val == "" {
-					if _, ok := flag.var.(Flag_Binding_Bool); ok {
+					if _, ok := flag.var.(Binding_Boolean); ok {
 						val = "1"
 						n = 1
 					} else if (i + 1 < len(args)) {
@@ -253,13 +254,32 @@ _parse_args_commands :: proc(
 				ok: bool
 				message: string
 				switch binding in flag.var {
-				case Flag_Binding_Bool:
+				case Binding_Boolean:
 					binding.bool_^, ok = strconv.parse_bool(val)
-				case Flag_Binding_Int:
-					binding.int_^, ok = strconv.parse_int(val)
-				case Flag_Binding_String:
+				case Binding_Integer:
+					i: int
+					i, ok = strconv.parse_int(val)
+					if binding.min <= i && i <= binding.max {
+						binding.int_^ = i
+					} else {
+						message = fmt.tprintf(
+							"integer must be between %v and %v.",
+							binding.min,
+							binding.max,
+						)
+						ok = false
+					}
+				case Binding_String:
 					binding.string_^, ok = val, true
-				case Flag_Binding_Map:
+				case Binding_Dynamic_Array:
+					if binding.validator != nil {
+						message = binding.validator(len(binding.dynamic_array^), val)
+					}
+					if message == "" {
+						append(binding.dynamic_array, val)
+						ok = true
+					}
+				case Binding_Map:
 					map_key, map_val := split_key_value_pair(val)
 					if binding.validator != nil {
 						message = binding.validator(map_key, map_val)
@@ -272,7 +292,7 @@ _parse_args_commands :: proc(
 						binding.map_^[map_key] = map_val
 						ok = true
 					}
-				case Flag_Parser:
+				case Binding_Enum:
 					ok = binding.procedure(binding.data, val)
 					if !ok && 0 < len(binding.available_options) {
 						message = fmt.tprintf("Expected one of %#v", binding.available_options)
@@ -379,16 +399,53 @@ flags_help_text :: proc(
 		//  {exec_file}    C:\devel\odin.exe
 		//  {exec_base}    odin
 		//  {command}      build
-		fmt.sbprintf(&help, "\t-%v\n\t\t%v\n", flag.name, flag.description)
+
+		param: string
 
 		#partial switch binding in flag.var {
-		case Flag_Parser:
+		// maybe?
+		// case Binding_Boolean:
+		//     param = ":<bool>" // ???
+		case Binding_Integer:
+			param = binding.param
+		case Binding_String:
+			param = binding.param
+		case Binding_Enum:
+			param = binding.param
+		case Binding_Dynamic_Array:
+			param = binding.param
+		case Binding_Map:
+			param = binding.param
+		}
+
+		if (param == "") {
+			fmt.sbprintf(&help, "\t-%v\n\t\t%v\n", flag.name, flag.description)
+		} else {
+			fmt.sbprintf(&help, "\t-%v:%v\n\t\t%v\n", flag.name, param, flag.description)
+		}
+
+		#partial switch binding in flag.var {
+		case Binding_Integer:
+			if INT_MIN < binding.min {
+				fmt.sbprintf(&help, "\t\tMust be greater than %v.\n", binding.min - 1)
+			}
+			if binding.max < INT_MAX {
+				fmt.sbprintf(&help, "\t\tCannot be greater than %v.\n", binding.max)
+			}
+			if binding.int_^ != 0 {
+				fmt.sbprintf(&help, "\t\tThe default is %v.\n", binding.int_^)
+			}
+		case Binding_String:
+			if binding.string_^ != "" {
+				fmt.sbprintf(&help, "\t\tThe default is %v.\n", binding.string_^)
+			}
+		case Binding_Enum:
 			fmt.sbprintln(&help, "\t\tAvailable options:")
 			for value in binding.available_options {
 				fmt.sbprintf(&help, "\t\t\t-%v:%v\n", flag.name, value)
 			}
-			fmt.sbprintf(&help, "\t\tThe default is -%v:%v.\n", flag.name, binding.default)
-			if (binding.cardinality == .Many) {
+			fmt.sbprintf(&help, "\t\tThe default is -%v:%v.\n", flag.name, binding.default) // if non empty?
+			if (binding.bit_set_) {
 				fmt.sbprintln(&help, "\t\tNOTE: This flag can be used multiple times.\n")
 			}
 		}
@@ -399,40 +456,52 @@ flags_help_text :: proc(
 
 // ---
 
-Flag_Binding :: struct {
+Binding :: struct {
 	param: string,
 }
 
-Flag_Binding_Bool :: struct {
-	using _: Flag_Binding,
+Binding_Boolean :: struct {
+	using _: Binding,
 	bool_:   ^bool,
 }
 
-bind_bool :: proc(bool_: ^bool) -> Flag_Bindings {
-	binding: Flag_Binding_Bool
+bind_bool :: proc(bool_: ^bool) -> Bindings {
+	binding: Binding_Boolean
 	binding.bool_ = bool_
 	return binding
 }
 
-Flag_Binding_Int :: struct {
-	using _: Flag_Binding,
+Binding_Integer :: struct {
+	using _: Binding,
 	int_:    ^int,
+	min:     int,
+	max:     int,
 }
 
-bind_int :: proc(int_: ^int, param := "<integer>") -> Flag_Bindings {
-	binding: Flag_Binding_Int
+INT_MAX :: 1 << (8 * size_of(int) - 1) - 1
+INT_MIN :: -INT_MAX // we can go one less but then you cannot take the abs of that, so let's not
+
+bind_int :: proc(
+	int_: ^int,
+	param := "<integer>",
+	min: int = INT_MIN,
+	max: int = INT_MAX,
+) -> Bindings {
+	binding: Binding_Integer
 	binding.param = param
 	binding.int_ = int_
+	binding.min = min
+	binding.max = max
 	return binding
 }
 
-Flag_Binding_String :: struct {
-	using _: Flag_Binding,
+Binding_String :: struct {
+	using _: Binding,
 	string_: ^string,
 }
 
-bind_string :: proc(string_: ^string, param := "<string>") -> Flag_Bindings {
-	binding: Flag_Binding_String
+bind_string :: proc(string_: ^string, param := "<string>") -> Bindings {
+	binding: Binding_String
 	binding.param = param
 	binding.string_ = string_
 	return binding
@@ -440,82 +509,92 @@ bind_string :: proc(string_: ^string, param := "<string>") -> Flag_Bindings {
 
 // ---
 
-Flag_Parser_Proc :: #type proc(data: rawptr, value: string) -> (ok: bool)
+Binding_Enum_Parser_Proc :: #type proc(data: rawptr, value: string) -> (ok: bool)
 
-Flag_Cardinality :: enum {
-	One,
-	Many,
-}
-
-Flag_Parser :: struct {
-	procedure:         Flag_Parser_Proc,
+Binding_Enum :: struct {
+	using _:           Binding,
+	procedure:         Binding_Enum_Parser_Proc,
 	data:              rawptr,
 	available_options: []string, // if non-empty a string passed on the command line must be a member of this set
 	default:           string,
-	cardinality:       Flag_Cardinality, // maybe...
+	bit_set_:          bool,
 }
 
 bind_enum :: proc(
 	enum_: ^$Enum_Type,
 	param := "<string>",
-) -> Flag_Parser where intrinsics.type_is_enum(Enum_Type) {
+) -> Binding_Enum where intrinsics.type_is_enum(Enum_Type) {
 	bind :: proc(enum_: ^Enum_Type, name: string) -> bool {
 		value := reflect.enum_from_name(Enum_Type, name) or_return
 		enum_^ = value
 		return true
 	}
-	return(
-		 {
-			Flag_Parser_Proc(bind),
-			enum_,
-			reflect.enum_field_names(Enum_Type),
-			fmt.aprint(enum_^),
-			.One,
-		} \
-	)
+    binding: Binding_Enum
+    binding.param = param
+    binding.procedure = Binding_Enum_Parser_Proc(bind)
+    binding.data = enum_; // todo: rename data to enum_?
+    binding.available_options = reflect.enum_field_names(Enum_Type)
+    binding.default = fmt.tprint(enum_^)
+	return binding
 }
 
 bind_bit_set :: proc(
 	bit_set_: ^$Bit_Set_Type/bit_set[$Enum_Type],
 	param := "<string>",
-) -> Flag_Parser where intrinsics.type_is_bit_set(Bit_Set_Type) {
+) -> Binding_Enum where intrinsics.type_is_bit_set(Bit_Set_Type) {
 	bind :: proc(bit_set_: ^Bit_Set_Type, name: string) -> bool {
-		// todo: split comma?
+		// todo: split on comma?
 		value := reflect.enum_from_name(Enum_Type, name) or_return
 		bit_set_^ += {value}
 		return true
 	}
-	// todo: render default value as -flag:foo,bar,baz?
-	return(
-		 {
-			Flag_Parser_Proc(bind),
-			bit_set_,
-			reflect.enum_field_names(Enum_Type),
-			fmt.aprint(bit_set_^),
-			.Many,
-		} \
-	)
+	binding: Binding_Enum
+    binding.param = param
+    binding.procedure = Binding_Enum_Parser_Proc(bind)
+    binding.data = bit_set_;
+    binding.available_options = reflect.enum_field_names(Enum_Type)
+    binding.default = fmt.tprint(bit_set_^) // todo: render default value as -flag:foo,bar,baz?
+    binding.bit_set_ = true
+	return binding
 }
 
-// Flag_Binding_Map?
-// Map_Binding? <- this!!!
-// Map_Binding_Validator_Proc?
-Flag_Validator_Proc :: #type proc(key: string, val: string) -> (err: string)
+// these could transform key=value pair as well; if they wanted to
+Binding_Map_Validator_Proc :: #type proc(key: string, val: string) -> (err: string)
 
-Flag_Binding_Map :: struct {
-	using _:   Flag_Binding,
+Binding_Map :: struct {
+	using _:   Binding,
 	map_:      ^map[string]string,
-	validator: Flag_Validator_Proc,
+	validator: Binding_Map_Validator_Proc,
 }
 
 bind_map :: proc(
 	map_: ^map[string]string,
 	param := "<key>=<value>",
-	validator: Flag_Validator_Proc = nil,
-) -> Flag_Bindings {
-	binding: Flag_Binding_Map
+	validator: Binding_Map_Validator_Proc = nil,
+) -> Bindings {
+	binding: Binding_Map
 	binding.param = param
 	binding.map_ = map_
+	binding.validator = validator
+	return binding
+}
+
+Binding_Dynamic_Array_Validator_Proc :: #type proc(index: int, val: string) -> (err: string)
+
+Binding_Dynamic_Array :: struct {
+	using _:       Binding,
+	dynamic_array: ^[dynamic]string,
+	validator:     Binding_Dynamic_Array_Validator_Proc,
+}
+
+bind_dynamic_array :: proc(
+	dynamic_array: ^[dynamic]string,
+	param := "<string>",
+	validator: Binding_Dynamic_Array_Validator_Proc = nil,
+) -> Bindings {
+	binding: Binding_Dynamic_Array
+	binding.param = param
+	binding.dynamic_array = dynamic_array
 	binding.validator = validator
 	return binding
 }
@@ -526,5 +605,6 @@ bind :: proc {
 	bind_string,
 	bind_enum,
 	bind_bit_set,
+	bind_dynamic_array,
 	bind_map,
 }

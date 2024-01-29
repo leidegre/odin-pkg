@@ -3,6 +3,7 @@ package flag_test
 import "core:fmt"
 import "core:intrinsics"
 import "core:reflect"
+import "core:slice"
 import "core:testing"
 
 import "../flag"
@@ -138,4 +139,25 @@ test_parse_bit_set :: proc(t: ^testing.T) {
 		flag.parse_args_flags(flags, test.args, .Assert_On_Error)
 		testing.expect_value(t, meta_vars, test.expected)
 	}
+}
+
+
+@(test)
+test_parse_dynamic_array :: proc(t: ^testing.T) {
+	dynamic_array: [dynamic]string
+
+	flags := []flag.Flag_Dummy {
+		flag.Flag_Dummy{flag.bind_dynamic_array(&dynamic_array), "a", "", {}},
+	}
+
+	testing.expect(t, dynamic_array == nil)
+
+	flag.parse_args_flags(flags, []string{"", "-a:foo"}, .Assert_On_Error)
+	testing.expect(t, slice.equal(dynamic_array[:], []string{"foo"}))
+
+	flag.parse_args_flags(flags, []string{"", "-a:foo", "-a:bar"}, .Assert_On_Error)
+	testing.expect(t, slice.equal(dynamic_array[:], []string{"foo", "bar"}))
+
+	flag.parse_args_flags(flags, []string{"", "-a:foo", "-a:bar", "-a:baz"}, .Assert_On_Error)
+	testing.expect(t, slice.equal(dynamic_array[:], []string{"foo", "bar", "baz"}))
 }

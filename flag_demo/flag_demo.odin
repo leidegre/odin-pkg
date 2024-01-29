@@ -24,20 +24,21 @@ Odin_Optimization_Level :: enum {
 	Aggressive,
 }
 
-Odin_SanitizerFlag :: enum {
+Odin_Sanitizer_Flag :: enum {
 	Address,
 	Memory,
 	Thread,
 }
-Odin_SanitizerFlags :: bit_set[Odin_SanitizerFlag]
+Odin_Sanitizer_Flags :: bit_set[Odin_Sanitizer_Flag]
 
 Odin_Build_Context :: struct {
 	file:               string,
 	out_filepath:       string,
 	optimization_level: Odin_Optimization_Level,
 	show_timings:       bool,
-	sanitizer_flags:    Odin_SanitizerFlags,
+	sanitizer_flags:    Odin_Sanitizer_Flags,
 	collection:         map[string]string,
+    max_error_count:    int,
 }
 
 parse_args :: proc(
@@ -79,13 +80,13 @@ parse_args :: proc(
 			"o",
 			"Sets the optimization mode for compilation.",
 			Build_Or_Run,
-		},// o:<string>? {"o", "string"}?
+		},
 		 {
 			flag.bind(&build_context.sanitizer_flags),
 			"sanitize",
 			"Enables sanitization analysis.",
 			Build_Or_Run,
-		},// o:<string>? {"o", "string"}?
+		},
 		 {
 			flag.bind(&build_context.show_timings),
 			"show-timings",
@@ -99,6 +100,12 @@ parse_args :: proc(
 			"\t\tExample: -collection:shared=dir/to/shared" +
 			"\t\tUsage in Code:\n" +
 			"\t\t\timport \"shared:foo\"",
+			Build_Or_Run,
+		},
+        {
+			flag.bind(&build_context.max_error_count, min=1),
+			"max-error-count",
+			"Sets the maximum number of errors that can be displayed before the compiler terminates.",
 			Build_Or_Run,
 		},
 	}
@@ -128,7 +135,12 @@ parse_args :: proc(
 
 main :: proc() {
 	build_context: Odin_Build_Context
-	build_context.optimization_level = Odin_Optimization_Level.Minimal // default
-	fmt.println(parse_args(&build_context))
+    
+    // defaults
+	build_context.optimization_level = Odin_Optimization_Level.Minimal 
+    build_context.max_error_count = 36
+	
+    fmt.println(parse_args(&build_context))
+
 	fmt.printf("%#v\n", build_context)
 }
