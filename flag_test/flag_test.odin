@@ -1,9 +1,9 @@
 package flag_test
 
-import "core:testing"
+import "core:fmt"
 import "core:intrinsics"
 import "core:reflect"
-import "core:fmt"
+import "core:testing"
 
 import "../flag"
 
@@ -19,7 +19,7 @@ test_parse_flags_string :: proc(t: ^testing.T) {
 
 	foo: string
 
-	flags := []flag.Flag_Dummy{flag.make_flag(&foo, "foo")}
+	flags := []flag.Flag_Dummy{{flag.bind(&foo), "foo", "", {}}}
 
 	flag.parse_args_flags(flags, []string{"", "-foo:bar"}, .Assert_On_Error)
 	testing.expect_value(t, foo, "bar")
@@ -42,7 +42,7 @@ test_parse_flags_string :: proc(t: ^testing.T) {
 test_parse_flags_int :: proc(t: ^testing.T) {
 	i: int
 
-	flags := []flag.Flag_Dummy{flag.make_flag(&i, "i")}
+	flags := []flag.Flag_Dummy{{flag.bind(&i), "i", "", {}}}
 
 	flag.parse_args_flags(flags, []string{"", "-i:123"}, .Assert_On_Error)
 	testing.expect_value(t, i, 123)
@@ -58,7 +58,7 @@ test_parse_flags_int :: proc(t: ^testing.T) {
 test_parse_flags_bool :: proc(t: ^testing.T) {
 	b: bool
 
-	flags := []flag.Flag_Dummy{flag.make_flag(&b, "b")}
+	flags := []flag.Flag_Dummy{{flag.bind(&b), "b", "", {}}}
 
 	Test :: struct {
 		args:     []string,
@@ -83,19 +83,17 @@ test_parse_flags_bool :: proc(t: ^testing.T) {
 
 @(test)
 test_parse_enum :: proc(t: ^testing.T) {
-    Metasyntactic_Variable :: enum {
-        Foo,
-        Bar,
-        Baz
-    }
+	Metasyntactic_Variable :: enum {
+		Foo,
+		Bar,
+		Baz,
+	}
 
-    meta_var: Metasyntactic_Variable
+	meta_var: Metasyntactic_Variable
 
-	flags := []flag.Flag_Dummy{
-        flag.Flag_Dummy{flag.bind_enum(&meta_var), "meta-var", "", {}}
-    }
+	flags := []flag.Flag_Dummy{flag.Flag_Dummy{flag.bind(&meta_var), "meta-var", "", {}}}
 
-    Test :: struct {
+	Test :: struct {
 		args:     []string,
 		expected: Metasyntactic_Variable,
 	}
@@ -114,20 +112,18 @@ test_parse_enum :: proc(t: ^testing.T) {
 
 @(test)
 test_parse_bit_set :: proc(t: ^testing.T) {
-    Metasyntactic_Variable :: enum {
-        Foo,
-        Bar,
-        Baz
-    }
-    Metasyntactic_Variables :: bit_set[Metasyntactic_Variable]
+	Metasyntactic_Variable :: enum {
+		Foo,
+		Bar,
+		Baz,
+	}
+	Metasyntactic_Variables :: bit_set[Metasyntactic_Variable]
 
-    meta_vars: Metasyntactic_Variables
+	meta_vars: Metasyntactic_Variables
 
-	flags := []flag.Flag_Dummy{
-        flag.Flag_Dummy{flag.bind_bit_set(&meta_vars), "meta-var", "", {}}
-    }
+	flags := []flag.Flag_Dummy{flag.Flag_Dummy{flag.bind_bit_set(&meta_vars), "meta-var", "", {}}}
 
-    Test :: struct {
+	Test :: struct {
 		args:     []string,
 		expected: Metasyntactic_Variables,
 	}
