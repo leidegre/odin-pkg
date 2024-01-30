@@ -147,8 +147,11 @@ test_parse_bit_set :: proc(t: ^testing.T) {
 		flag.parse_args_flags(flags, test.args, .Assert_On_Error)
 		testing.expect_value(t, meta_vars, test.expected)
 	}
-}
 
+	meta_vars = {}
+	flag.parse_args_flags(flags, []string{"", "-meta-var:Baz,Bar,Foo"}, .Assert_On_Error)
+	testing.expect_value(t, meta_vars, Metasyntactic_Variables({.Foo, .Bar, .Baz}))
+}
 
 @(test)
 test_parse_dynamic_array :: proc(t: ^testing.T) {

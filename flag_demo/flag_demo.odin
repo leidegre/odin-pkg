@@ -62,40 +62,40 @@ parse_args :: proc(
 	Command_Does_Check :: bit_set[Odin_Command]{.Run, .Build, .Check}
 
 	flags := []flag.Flag(Odin_Command) {
-		 {
+		{
 			"file",
-			flag.bind(&build_context.file),
+			flag.bind(&build_context.file, ":<filepath>"),
 			"Tells `%v` to treat the given file as a self-contained package.\n" +
 			"\t\tThis means that `<dir>/a.odin` won't have access to `<dir>/b.odin`'s contents.",
 			Build_Or_Run + {.Check},
 		},
-		 {
+		{
 			"out",
-			flag.bind(&build_context.out_filepath),
+			flag.bind(&build_context.out_filepath, ":<filepath>"),
 			"Sets the file name of the outputted executable.\n" + "\t\tExample: -out:foo.exe",
 			Build_Or_Run,
 		},
-		 {
+		{
 			"o",
 			flag.bind(&build_context.optimization_level),
 			"Sets the optimization mode for compilation.",
 			Build_Or_Run,
 		},
-		 {
+		{
 			"sanitize",
 			flag.bind(&build_context.sanitizer_flags),
 			"Enables sanitization analysis.",
 			Build_Or_Run,
 		},
-		 {
+		{
 			"show-timings",
 			flag.bind(&build_context.show_timings),
 			"Shows basic overview of the timings of different stages within the compiler in milliseconds.",
 			Build_Or_Run,
 		},
-		 {
+		{
 			"collection",
-			flag.bind(&build_context.collection, "<name>=<filepath>", collection_validator),
+			flag.bind(&build_context.collection, ":<name>=<filepath>", collection_validator),
 			"Defines a library collection used for imports.\n" +
 			"\t\tExample: -collection:shared=dir/to/shared\n" +
 			"\t\tUsage in Code:\n" +
@@ -138,6 +138,7 @@ main :: proc() {
 	
 	// defaults
 	build_context.optimization_level = Odin_Optimization_Level.Minimal 
+    build_context.sanitizer_flags += {.Address}
 	build_context.max_error_count = 36
 	
 	fmt.println(parse_args(&build_context))

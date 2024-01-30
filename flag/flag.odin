@@ -20,7 +20,7 @@ Bindings :: union {
 	Binding_Integer,
 	Binding_String,
 	Binding_Dynamic_Array, // [dynamic]string
-	Binding_Map,           // map[string]string
+	Binding_Map, // map[string]string
 	Binding_Enum,
 }
 
@@ -77,12 +77,12 @@ parse_args_commands :: proc(
 	command: E,
 	err: Error,
 ) where intrinsics.type_is_enum(E) {
-	command, err = _parse_args_commands(E, commands, flags, args != nil ? args : os.args)
+	command, err = _parse_args_commands(E, commands, flags, args if args != nil else os.args)
 	if err.code != .Ok {
 		fmt.eprintln(err.message)
 		switch error_handling {
 		case .Exit_On_Error:
-			os.exit(err.code != .Help_Text ? 2 : 0)
+			os.exit(2 if err.code != .Help_Text else 0)
 		case .Return_On_Error:
 			return
 		case .Assert_On_Error:
@@ -391,12 +391,9 @@ flags_help_text :: proc(
 		param: string
 
 		#partial switch binding in flag.binding {
-		// maybe?
-		// case Binding_Boolean:
-		//     param = ":<bool>" // ???
-		case Binding_Integer:
-			param = binding.param
 		case Binding_String:
+			param = binding.param
+		case Binding_Integer:
 			param = binding.param
 		case Binding_Enum:
 			param = binding.param
@@ -406,11 +403,7 @@ flags_help_text :: proc(
 			param = binding.param
 		}
 
-		if (param == "") {
-			fmt.sbprintf(&help, "\t-%v\n\t\t%v\n", flag.name, flag.description)
-		} else {
-			fmt.sbprintf(&help, "\t-%v:%v\n\t\t%v\n", flag.name, param, flag.description)
-		}
+		fmt.sbprintf(&help, "\t-%v%v\n\t\t%v\n", flag.name, param, flag.description)
 
 		#partial switch binding in flag.binding {
 		case Binding_Integer:
@@ -471,7 +464,7 @@ INT_MIN :: -INT_MAX // we can go one less but then you cannot take the abs of th
 
 bind_int :: proc(
 	int_: ^int,
-	param := "<integer>",
+	param := ":<integer>",
 	min: int = INT_MIN,
 	max: int = INT_MAX,
 ) -> Bindings {
@@ -488,7 +481,7 @@ Binding_String :: struct {
 	string_: ^string,
 }
 
-bind_string :: proc(string_: ^string, param := "<string>") -> Bindings {
+bind_string :: proc(string_: ^string, param := ":<string>") -> Bindings {
 	binding: Binding_String
 	binding.param = param
 	binding.string_ = string_
@@ -510,7 +503,7 @@ Binding_Enum :: struct {
 
 bind_enum :: proc(
 	enum_: ^$Enum_Type,
-	param := "<string>",
+	param := ":<string>",
 ) -> Binding_Enum where intrinsics.type_is_enum(Enum_Type) {
 	bind :: proc(enum_: ^Enum_Type, name: string) -> bool {
 		value := reflect.enum_from_name(Enum_Type, name) or_return
@@ -520,7 +513,7 @@ bind_enum :: proc(
 	binding: Binding_Enum
 	binding.param = param
 	binding.procedure = Binding_Enum_Parser_Proc(bind)
-	binding.data = enum_; // todo: rename data to enum_?
+	binding.data = enum_ // todo: rename data to enum_?
 	binding.available_options = reflect.enum_field_names(Enum_Type)
 	binding.default = fmt.tprint(enum_^)
 	return binding
@@ -528,20 +521,45 @@ bind_enum :: proc(
 
 bind_bit_set :: proc(
 	bit_set_: ^$Bit_Set_Type/bit_set[$Enum_Type],
-	param := "<string>",
+	param := ":<string>",
 ) -> Binding_Enum where intrinsics.type_is_bit_set(Bit_Set_Type) {
-	bind :: proc(bit_set_: ^Bit_Set_Type, name: string) -> bool {
-		// todo: split on comma?
-		value := reflect.enum_from_name(Enum_Type, name) or_return
-		bit_set_^ += {value}
+	bind :: proc(bit_set_: ^Bit_Set_Type, names: string) -> bool {
+		// -flag:foo,bar,baz
+		names, _ := strings.split(names, ",", allocator = context.temp_allocator) // todo: handle allocation error?
+		for name in names {
+			switch {
+				case:
+					drop: int
+					if strings.has_prefix(name, "+"){ 
+						drop = 1
+					}
+					value := reflect.enum_from_name(Enum_Type, name[drop:]) or_return
+					bit_set_^ += {value}
+				case strings.has_prefix(name, "-"):
+					value := reflect.enum_from_name(Enum_Type, name[1:]) or_return
+					bit_set_^ -= {value}
+				case name == "~0":
+					bit_set_^ = ~{} // works but it sets all bits, so in our example we have 3 flags which fits in a byte the end result of this is {Address, Memory, 3, 4, 5, 6, 7}
+				}
+			
+		}
 		return true
 	}
 	binding: Binding_Enum
 	binding.param = param
 	binding.procedure = Binding_Enum_Parser_Proc(bind)
-	binding.data = bit_set_;
+	binding.data = bit_set_
 	binding.available_options = reflect.enum_field_names(Enum_Type)
-	binding.default = fmt.tprint(bit_set_^) // todo: render default value as -flag:foo,bar,baz?
+	sb: strings.Builder
+	for bit, i in reflect.enum_field_values(Enum_Type) {
+		if Enum_Type(bit) in bit_set_^ {
+			if 0 < strings.builder_len(sb) { 
+				strings.write_rune(&sb, ',')
+			}
+			strings.write_string(&sb, binding.available_options[i])
+		}
+	}
+	binding.default = strings.to_string(sb)
 	binding.bit_set_ = true
 	return binding
 }
@@ -557,7 +575,7 @@ Binding_Map :: struct {
 
 bind_map :: proc(
 	map_: ^map[string]string,
-	param := "<key>=<value>",
+	param := ":<key>=<value>",
 	validator: Binding_Map_Validator_Proc = nil,
 ) -> Bindings {
 	binding: Binding_Map
@@ -577,7 +595,7 @@ Binding_Dynamic_Array :: struct {
 
 bind_dynamic_array :: proc(
 	dynamic_array: ^[dynamic]string,
-	param := "<string>",
+	param := ":<string>",
 	validator: Binding_Dynamic_Array_Validator_Proc = nil,
 ) -> Bindings {
 	binding: Binding_Dynamic_Array
