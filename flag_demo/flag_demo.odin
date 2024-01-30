@@ -38,7 +38,7 @@ Odin_Build_Context :: struct {
 	show_timings:       bool,
 	sanitizer_flags:    Odin_Sanitizer_Flags,
 	collection:         map[string]string,
-    max_error_count:    int,
+	max_error_count:    int,
 }
 
 parse_args :: proc(
@@ -63,48 +63,48 @@ parse_args :: proc(
 
 	flags := []flag.Flag(Odin_Command) {
 		 {
-			flag.bind(&build_context.file),
 			"file",
+			flag.bind(&build_context.file),
 			"Tells `%v` to treat the given file as a self-contained package.\n" +
 			"\t\tThis means that `<dir>/a.odin` won't have access to `<dir>/b.odin`'s contents.",
 			Build_Or_Run + {.Check},
 		},
 		 {
-			flag.bind(&build_context.out_filepath),
 			"out",
+			flag.bind(&build_context.out_filepath),
 			"Sets the file name of the outputted executable.\n" + "\t\tExample: -out:foo.exe",
 			Build_Or_Run,
 		},
 		 {
-			flag.bind(&build_context.optimization_level),
 			"o",
+			flag.bind(&build_context.optimization_level),
 			"Sets the optimization mode for compilation.",
 			Build_Or_Run,
 		},
 		 {
-			flag.bind(&build_context.sanitizer_flags),
 			"sanitize",
+			flag.bind(&build_context.sanitizer_flags),
 			"Enables sanitization analysis.",
 			Build_Or_Run,
 		},
 		 {
-			flag.bind(&build_context.show_timings),
 			"show-timings",
+			flag.bind(&build_context.show_timings),
 			"Shows basic overview of the timings of different stages within the compiler in milliseconds.",
 			Build_Or_Run,
 		},
 		 {
-			flag.bind(&build_context.collection, "<name>=<filepath>", collection_validator),
 			"collection",
+			flag.bind(&build_context.collection, "<name>=<filepath>", collection_validator),
 			"Defines a library collection used for imports.\n" +
-			"\t\tExample: -collection:shared=dir/to/shared" +
+			"\t\tExample: -collection:shared=dir/to/shared\n" +
 			"\t\tUsage in Code:\n" +
 			"\t\t\timport \"shared:foo\"",
 			Build_Or_Run,
 		},
-        {
-			flag.bind(&build_context.max_error_count, min=1),
+		{
 			"max-error-count",
+			flag.bind(&build_context.max_error_count, min=1),
 			"Sets the maximum number of errors that can be displayed before the compiler terminates.",
 			Build_Or_Run,
 		},
@@ -135,12 +135,12 @@ parse_args :: proc(
 
 main :: proc() {
 	build_context: Odin_Build_Context
-    
-    // defaults
-	build_context.optimization_level = Odin_Optimization_Level.Minimal 
-    build_context.max_error_count = 36
 	
-    fmt.println(parse_args(&build_context))
+	// defaults
+	build_context.optimization_level = Odin_Optimization_Level.Minimal 
+	build_context.max_error_count = 36
+	
+	fmt.println(parse_args(&build_context))
 
 	fmt.printf("%#v\n", build_context)
 }

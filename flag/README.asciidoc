@@ -7,6 +7,47 @@
 
 This package provides utilities for populating existing data structures with data from the command line. The package is somewhat opinionated about how commands and flags have to be expressed but I'd argue it a good thing that will lead to a consistent user experience.
 
+== Convention
+
+These are all functionally equivalent.
+
+----
+# this is a comment
+
+--flag          # bool, optional argument
+--flag arg
+--flag:arg
+--flag=arg
+
+-f
+-f arg
+-f:arg
+
+-f key=value
+-f:key=value
+----
+
+This also works but will generate a warning about being unconventional.
+
+----
+--flag=key:value
+----
+
+These can technically work but they may generate an error. If you bind to a `map[string]string` type we're going to enforce the `flag:key=value` convention.
+
+----
+--flag=key=value
+--flag:key:value
+----
+
+These look like rooted paths on Linux and are treated as arguments, regardless. It will generate a warning on Windows.
+
+----
+/flag arg
+/flag:arg
+/flag=arg
+----
+
 == Example
 
 [source,odin]

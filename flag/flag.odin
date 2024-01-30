@@ -8,8 +8,8 @@ import "core:strconv"
 import "core:strings"
 import "core:unicode"
 
-Command :: struct($Enum_Type: typeid) where intrinsics.type_is_enum(Enum_Type) {
-	type:        Enum_Type,
+Command :: struct($Command_Type: typeid) where intrinsics.type_is_enum(Command_Type) {
+	type:        Command_Type,
 	name:        string,
 	description: string,
 }
@@ -20,27 +20,16 @@ Bindings :: union {
 	Binding_Integer,
 	Binding_String,
 	Binding_Dynamic_Array, // [dynamic]string
-	Binding_Map, // map[string]string
+	Binding_Map,           // map[string]string
 	Binding_Enum,
 }
 
 // -name:argument
-Flag :: struct($Enum_Type: typeid) where intrinsics.type_is_enum(Enum_Type) {
-	var:         Bindings, // binding
+Flag :: struct($Command_Type: typeid) where intrinsics.type_is_enum(Command_Type) {
 	name:        string,
+	binding:     Bindings,
 	description: string,
-	commands:    bit_set[Enum_Type], // supported_commands? has?
-}
-
-// while it is possible to put a unnamed enum inside the Flag it will break the type checker
-Dummy :: enum {
-	None,
-}
-
-Flag_Dummy :: Flag(Dummy)
-
-make_flag :: proc(var: Bindings, name: string, description: string = "") -> Flag_Dummy {
-	return {var, name, description, {}}
+	commands:    bit_set[Command_Type], // supported_commands? has?
 }
 
 Error_Code :: enum {
@@ -78,13 +67,12 @@ parse_args_flags :: proc(
 	return
 }
 
-// mother of all parsers
 parse_args_commands :: proc(
 	$E: typeid,
 	commands: []Command(E),
 	flags: []Flag(E),
 	args: []string = nil,
-	mode: Error_Handling = .Exit_On_Error,
+	error_handling: Error_Handling = .Exit_On_Error,
 ) -> (
 	command: E,
 	err: Error,
@@ -92,7 +80,7 @@ parse_args_commands :: proc(
 	command, err = _parse_args_commands(E, commands, flags, args != nil ? args : os.args)
 	if err.code != .Ok {
 		fmt.eprintln(err.message)
-		switch mode {
+		switch error_handling {
 		case .Exit_On_Error:
 			os.exit(err.code != .Help_Text ? 2 : 0)
 		case .Return_On_Error:
@@ -235,7 +223,7 @@ _parse_args_commands :: proc(
 				}
 
 				if val == "" {
-					if _, ok := flag.var.(Binding_Boolean); ok {
+					if _, ok := flag.binding.(Binding_Boolean); ok {
 						val = "1"
 						n = 1
 					} else if (i + 1 < len(args)) {
@@ -253,7 +241,7 @@ _parse_args_commands :: proc(
 
 				ok: bool
 				message: string
-				switch binding in flag.var {
+				switch binding in flag.binding {
 				case Binding_Boolean:
 					binding.bool_^, ok = strconv.parse_bool(val)
 				case Binding_Integer:
@@ -402,7 +390,7 @@ flags_help_text :: proc(
 
 		param: string
 
-		#partial switch binding in flag.var {
+		#partial switch binding in flag.binding {
 		// maybe?
 		// case Binding_Boolean:
 		//     param = ":<bool>" // ???
@@ -424,7 +412,7 @@ flags_help_text :: proc(
 			fmt.sbprintf(&help, "\t-%v:%v\n\t\t%v\n", flag.name, param, flag.description)
 		}
 
-		#partial switch binding in flag.var {
+		#partial switch binding in flag.binding {
 		case Binding_Integer:
 			if INT_MIN < binding.min {
 				fmt.sbprintf(&help, "\t\tMust be greater than %v.\n", binding.min - 1)
@@ -529,12 +517,12 @@ bind_enum :: proc(
 		enum_^ = value
 		return true
 	}
-    binding: Binding_Enum
-    binding.param = param
-    binding.procedure = Binding_Enum_Parser_Proc(bind)
-    binding.data = enum_; // todo: rename data to enum_?
-    binding.available_options = reflect.enum_field_names(Enum_Type)
-    binding.default = fmt.tprint(enum_^)
+	binding: Binding_Enum
+	binding.param = param
+	binding.procedure = Binding_Enum_Parser_Proc(bind)
+	binding.data = enum_; // todo: rename data to enum_?
+	binding.available_options = reflect.enum_field_names(Enum_Type)
+	binding.default = fmt.tprint(enum_^)
 	return binding
 }
 
@@ -549,12 +537,12 @@ bind_bit_set :: proc(
 		return true
 	}
 	binding: Binding_Enum
-    binding.param = param
-    binding.procedure = Binding_Enum_Parser_Proc(bind)
-    binding.data = bit_set_;
-    binding.available_options = reflect.enum_field_names(Enum_Type)
-    binding.default = fmt.tprint(bit_set_^) // todo: render default value as -flag:foo,bar,baz?
-    binding.bit_set_ = true
+	binding.param = param
+	binding.procedure = Binding_Enum_Parser_Proc(bind)
+	binding.data = bit_set_;
+	binding.available_options = reflect.enum_field_names(Enum_Type)
+	binding.default = fmt.tprint(bit_set_^) // todo: render default value as -flag:foo,bar,baz?
+	binding.bit_set_ = true
 	return binding
 }
 

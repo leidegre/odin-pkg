@@ -8,8 +8,12 @@ import "core:testing"
 
 import "../flag"
 
+Command_Type :: enum{}
+
+Flag :: flag.Flag(Command_Type)
+
 @(test)
-test_parse_flags_string :: proc(t: ^testing.T) {
+test_parse_args_string :: proc(t: ^testing.T) {
 	// -foo:bar
 	// -foo:bar=baz
 
@@ -20,7 +24,7 @@ test_parse_flags_string :: proc(t: ^testing.T) {
 
 	foo: string
 
-	flags := []flag.Flag_Dummy{{flag.bind(&foo), "foo", "", {}}}
+	flags := []Flag{{"foo", flag.bind(&foo), "", {}}}
 
 	flag.parse_args_flags(flags, []string{"", "-foo:bar"}, .Assert_On_Error)
 	testing.expect_value(t, foo, "bar")
@@ -40,10 +44,10 @@ test_parse_flags_string :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_parse_flags_int :: proc(t: ^testing.T) {
+test_parse_args_int :: proc(t: ^testing.T) {
 	i: int
 
-	flags := []flag.Flag_Dummy{{flag.bind(&i), "i", "", {}}}
+	flags := []Flag{{"i", flag.bind(&i), "", {}}}
 
 	flag.parse_args_flags(flags, []string{"", "-i:123"}, .Assert_On_Error)
 	testing.expect_value(t, i, 123)
@@ -56,10 +60,10 @@ test_parse_flags_int :: proc(t: ^testing.T) {
 }
 
 @(test)
-test_parse_flags_bool :: proc(t: ^testing.T) {
+test_parse_args_bool :: proc(t: ^testing.T) {
 	b: bool
 
-	flags := []flag.Flag_Dummy{{flag.bind(&b), "b", "", {}}}
+	flags := []Flag{{"b", flag.bind(&b), "", {}}}
 
 	Test :: struct {
 		args:     []string,
@@ -92,7 +96,9 @@ test_parse_enum :: proc(t: ^testing.T) {
 
 	meta_var: Metasyntactic_Variable
 
-	flags := []flag.Flag_Dummy{flag.Flag_Dummy{flag.bind(&meta_var), "meta-var", "", {}}}
+	flags := []Flag{
+		{"meta-var", flag.bind(&meta_var), "", {}},
+	}
 
 	Test :: struct {
 		args:     []string,
@@ -122,7 +128,9 @@ test_parse_bit_set :: proc(t: ^testing.T) {
 
 	meta_vars: Metasyntactic_Variables
 
-	flags := []flag.Flag_Dummy{flag.Flag_Dummy{flag.bind_bit_set(&meta_vars), "meta-var", "", {}}}
+	flags := []Flag{
+		{"meta-var", flag.bind_bit_set(&meta_vars), "", {}},
+	}
 
 	Test :: struct {
 		args:     []string,
@@ -146,8 +154,8 @@ test_parse_bit_set :: proc(t: ^testing.T) {
 test_parse_dynamic_array :: proc(t: ^testing.T) {
 	dynamic_array: [dynamic]string
 
-	flags := []flag.Flag_Dummy {
-		flag.Flag_Dummy{flag.bind_dynamic_array(&dynamic_array), "a", "", {}},
+	flags := []Flag {
+		{"a", flag.bind_dynamic_array(&dynamic_array), "", {}},
 	}
 
 	testing.expect(t, dynamic_array == nil)
@@ -155,9 +163,27 @@ test_parse_dynamic_array :: proc(t: ^testing.T) {
 	flag.parse_args_flags(flags, []string{"", "-a:foo"}, .Assert_On_Error)
 	testing.expect(t, slice.equal(dynamic_array[:], []string{"foo"}))
 
-	flag.parse_args_flags(flags, []string{"", "-a:foo", "-a:bar"}, .Assert_On_Error)
+	flag.parse_args_flags(flags, []string{"", "-a:bar"}, .Assert_On_Error)
 	testing.expect(t, slice.equal(dynamic_array[:], []string{"foo", "bar"}))
 
-	flag.parse_args_flags(flags, []string{"", "-a:foo", "-a:bar", "-a:baz"}, .Assert_On_Error)
+	flag.parse_args_flags(flags, []string{"", "-a:baz"}, .Assert_On_Error)
 	testing.expect(t, slice.equal(dynamic_array[:], []string{"foo", "bar", "baz"}))
+}
+
+@(test)
+test_parse_map :: proc(t: ^testing.T) {
+	map_: map[string]string
+
+	flags := []Flag {
+		{"m", flag.bind_map(&map_), "", {}},
+	}
+	
+	testing.expect(t, map_ == nil)
+
+	flag.parse_args_flags(flags, []string{"", "-m:foo=bar"}, .Assert_On_Error)
+	testing.expect_value(t, map_["foo"], "bar")
+
+	flag.parse_args_flags(flags, []string{"", "-m:bar=baz"}, .Assert_On_Error)
+	testing.expect_value(t, map_["foo"], "bar")
+	testing.expect_value(t, map_["bar"], "baz")
 }
