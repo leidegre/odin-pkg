@@ -7,6 +7,7 @@ import "core:reflect"
 import "core:strconv"
 import "core:strings"
 import "core:unicode"
+import "core:runtime"
 
 Command :: struct($Command_Type: typeid) where intrinsics.type_is_enum(Command_Type) {
 	type:        Command_Type,
@@ -200,7 +201,6 @@ _parse_args_commands :: proc(
 				}
 
 				if name == "help" {
-
 					err = {.Help_Text, flags_help_text(args[0], command, flags)}
 					return
 				}
@@ -276,14 +276,16 @@ _parse_args_commands :: proc(
 						if (binding.map_ == nil) {
 							binding.map_^ = make(map[string]string)
 						}
-						// todo: redefition of existing key is not allowed
+						// maybe: redefition of existing key is not allowed?
+						//        mistake or feature?
 						binding.map_^[map_key] = map_val
 						ok = true
 					}
 				case Binding_Enum:
-					ok = binding.procedure(binding.data, val)
-					if !ok && 0 < len(binding.available_options) {
-						message = fmt.tprintf("Expected one of %#v", binding.available_options)
+					ok = binding.procedure(binding, val)
+					names := binding->names()
+					if !ok && 0 < len(names) {
+						message = fmt.tprintf("Expected one of %#v", names)
 					}
 				}
 				if !ok {
@@ -421,11 +423,14 @@ flags_help_text :: proc(
 				fmt.sbprintf(&help, "\t\tThe default is %v.\n", binding.string_^)
 			}
 		case Binding_Enum:
-			fmt.sbprintln(&help, "\t\tAvailable options:")
-			for value in binding.available_options {
+            // todo: Binding_Custom
+			fmt.sbprintln(&help, "\t\tAvailable options:") // todo: if names?
+			names := binding->names()
+			for value in names {
 				fmt.sbprintf(&help, "\t\t\t-%v:%v\n", flag.name, value)
 			}
-			fmt.sbprintf(&help, "\t\tThe default is -%v:%v.\n", flag.name, binding.default) // if non empty?
+			default := binding->default()
+			fmt.sbprintf(&help, "\t\tThe default is -%v:%v.\n", flag.name, default) // todo: if non empty?
 			if (binding.bit_set_) {
 				fmt.sbprintln(&help, "\t\tNOTE: This flag can be used multiple times.\n")
 			}
@@ -490,32 +495,86 @@ bind_string :: proc(string_: ^string, param := ":<string>") -> Bindings {
 
 // ---
 
-Binding_Enum_Parser_Proc :: #type proc(data: rawptr, value: string) -> (ok: bool)
+Binding_Enum_Parser_Proc :: #type proc(binding: Binding_Enum, value: string) -> (ok: bool)
+
+// options?
+Binding_Enum_Names_Proc :: #type proc(binding: Binding_Enum) -> (names: []string)
+
+Binding_Enum_Default_Proc :: #type proc(binding: Binding_Enum) -> (default: string)
 
 Binding_Enum :: struct {
-	using _:           Binding,
-	procedure:         Binding_Enum_Parser_Proc,
-	data:              rawptr,
-	available_options: []string, // if non-empty a string passed on the command line must be a member of this set
-	default:           string,
-	bit_set_:          bool,
+	using _:   Binding,
+	procedure: Binding_Enum_Parser_Proc,
+	enum_:     rawptr, // ^Enum_Type, ^bit_set[Enum_Type]
+	rename:    runtime.Raw_Map, // map[string]Enum_Type
+	names:     Binding_Enum_Names_Proc,
+	default:   Binding_Enum_Default_Proc,
+	bit_set_:  bool,
 }
 
 bind_enum :: proc(
 	enum_: ^$Enum_Type,
 	param := ":<string>",
 ) -> Binding_Enum where intrinsics.type_is_enum(Enum_Type) {
-	bind :: proc(enum_: ^Enum_Type, name: string) -> bool {
+	return bind_enum_rename(enum_, param, nil)
+}
+
+bind_enum_rename :: proc(
+	enum_: ^$Enum_Type,
+	param := ":<string>",
+	rename: map[string]Enum_Type,
+) -> Binding_Enum where intrinsics.type_is_enum(Enum_Type) {
+	bind :: proc(binding: Binding_Enum, name: string) -> bool {
+		rename := transmute(map[string]Enum_Type)binding.rename
+		if rename != nil {
+			if value, ok := rename[name]; ok {
+				(^Enum_Type)(binding.enum_)^ = value
+				return true
+			} else {
+				return false
+			}
+		}
 		value := reflect.enum_from_name(Enum_Type, name) or_return
-		enum_^ = value
+		(^Enum_Type)(binding.enum_)^ = value
 		return true
 	}
 	binding: Binding_Enum
 	binding.param = param
 	binding.procedure = Binding_Enum_Parser_Proc(bind)
-	binding.data = enum_ // todo: rename data to enum_?
-	binding.available_options = reflect.enum_field_names(Enum_Type)
-	binding.default = fmt.tprint(enum_^)
+	binding.enum_ = enum_
+	binding.rename = transmute(runtime.Raw_Map)rename
+	binding.names = proc (binding: Binding_Enum) -> []string {
+		rename := transmute(map[string]Enum_Type)binding.rename
+		if rename != nil {
+			names := make([]string, len(rename), context.temp_allocator)
+			i: int
+			for k in rename {
+				names[i] = k
+				i += 1
+			}
+			return names[:]
+		}
+		return reflect.enum_field_names(Enum_Type)
+	}
+	binding.default = proc (binding: Binding_Enum) -> string {
+		value := (^Enum_Type)(binding.enum_)^
+		rename := transmute(map[string]Enum_Type)binding.rename
+		if rename != nil {
+			for name, bit in rename {
+				if bit == value {
+					return name
+				}
+			}
+		} else {
+			names := reflect.enum_field_names(Enum_Type)
+			for bit, i in reflect.enum_field_values(Enum_Type) {
+				if Enum_Type(bit) == value {
+					return names[i]
+				}
+			}
+		}
+		return ""
+	}
 	return binding
 }
 
@@ -523,43 +582,83 @@ bind_bit_set :: proc(
 	bit_set_: ^$Bit_Set_Type/bit_set[$Enum_Type],
 	param := ":<string>",
 ) -> Binding_Enum where intrinsics.type_is_bit_set(Bit_Set_Type) {
-	bind :: proc(bit_set_: ^Bit_Set_Type, names: string) -> bool {
+	return bind_bit_set_rename(bit_set_, param, nil)
+}
+
+bind_bit_set_rename :: proc(
+	bit_set_: ^$Bit_Set_Type/bit_set[$Enum_Type],
+	param := ":<string>",
+	rename: map[string]Enum_Type
+) -> Binding_Enum where intrinsics.type_is_bit_set(Bit_Set_Type) {
+	bind :: proc(binding: Binding_Enum, names: string) -> bool {
 		// -flag:foo,bar,baz
-		names, _ := strings.split(names, ",", allocator = context.temp_allocator) // todo: handle allocation error?
-		for name in names {
+		// -flag:0,bar everything off except bar
+		// -flag:~0,-bar everything on except bar
+		rename := transmute(map[string]Enum_Type)binding.rename
+		for name in strings.split(names, ",", allocator = context.temp_allocator) {
+			name := name
 			switch {
-				case:
-					drop: int
-					if strings.has_prefix(name, "+"){ 
-						drop = 1
-					}
-					value := reflect.enum_from_name(Enum_Type, name[drop:]) or_return
-					bit_set_^ += {value}
-				case strings.has_prefix(name, "-"):
-					value := reflect.enum_from_name(Enum_Type, name[1:]) or_return
-					bit_set_^ -= {value}
-				case name == "~0":
-					bit_set_^ = ~{} // works but it sets all bits, so in our example we have 3 flags which fits in a byte the end result of this is {Address, Memory, 3, 4, 5, 6, 7}
-				}
-			
+			case:
+				name = name[1:] if strings.has_prefix(name, "+") else name
+				value := rename[name] if rename != nil else reflect.enum_from_name(Enum_Type, name) or_return
+				(^Bit_Set_Type)(binding.enum_)^ += {value}
+			case strings.has_prefix(name, "-"):
+				name := name[1:]
+				value := rename[name] if rename != nil else reflect.enum_from_name(Enum_Type, name) or_return
+				(^Bit_Set_Type)(binding.enum_)^ -= {value}
+			case name == "0":
+				(^Bit_Set_Type)(binding.enum_)^ = {}
+			case name == "~0":
+				(^Bit_Set_Type)(binding.enum_)^ = ~{}
+			}
 		}
 		return true
 	}
 	binding: Binding_Enum
 	binding.param = param
 	binding.procedure = Binding_Enum_Parser_Proc(bind)
-	binding.data = bit_set_
-	binding.available_options = reflect.enum_field_names(Enum_Type)
-	sb: strings.Builder
-	for bit, i in reflect.enum_field_values(Enum_Type) {
-		if Enum_Type(bit) in bit_set_^ {
-			if 0 < strings.builder_len(sb) { 
-				strings.write_rune(&sb, ',')
+	binding.enum_ = bit_set_
+	binding.rename = transmute(runtime.Raw_Map)rename
+	binding.names = proc (binding: Binding_Enum) -> []string {
+		rename := transmute(map[string]Enum_Type)binding.rename
+		if rename != nil {
+			names := make([]string, len(rename), context.temp_allocator)
+			i: int
+			for k in rename {
+				names[i] = k
+				i += 1
 			}
-			strings.write_string(&sb, binding.available_options[i])
+			return names[:]
 		}
+		return reflect.enum_field_names(Enum_Type)
 	}
-	binding.default = strings.to_string(sb)
+	binding.default = proc (binding: Binding_Enum) -> string {
+		sb: strings.Builder
+		strings.builder_init(&sb, context.temp_allocator)
+		bits := (^Bit_Set_Type)(binding.enum_)^
+		rename := transmute(map[string]Enum_Type)binding.rename
+		if rename != nil {
+			for name, bit in rename {
+				if bit in bits {
+					if 0 < strings.builder_len(sb) {
+						strings.write_rune(&sb, ',')
+					}
+					strings.write_string(&sb, name)
+				}
+			}
+		} else {
+			names := reflect.enum_field_names(Enum_Type)
+			for bit, i in reflect.enum_field_values(Enum_Type) {
+				if Enum_Type(bit) in bits {
+					if 0 < strings.builder_len(sb) {
+						strings.write_rune(&sb, ',')
+					}
+					strings.write_string(&sb, names[i])
+				}
+			}
+		}
+		return strings.to_string(sb)
+	}
 	binding.bit_set_ = true
 	return binding
 }
@@ -610,7 +709,9 @@ bind :: proc {
 	bind_int,
 	bind_string,
 	bind_enum,
+	bind_enum_rename,
 	bind_bit_set,
+	bind_bit_set_rename,
 	bind_dynamic_array,
 	bind_map,
 }
