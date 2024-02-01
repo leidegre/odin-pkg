@@ -8,6 +8,7 @@ import "core:strconv"
 import "core:strings"
 import "core:unicode"
 import "core:runtime"
+import "core:path/filepath"
 
 Command :: struct($Command_Type: typeid) where intrinsics.type_is_enum(Command_Type) {
 	type:        Command_Type,
@@ -112,10 +113,21 @@ _parse_args_commands :: proc(
 	command: Command(E)
 
 	if 0 < len(commands) {
-		// first argument should be a command
-		if len(args) <= 1 {
+		// exe <command>
+		// exe help
+		// exe help <command>
+		if !(i < len(args))  {
 			err = {.Help_Text, commands_help_text(args[0], commands)}
 			return
+		}
+		show_help := false
+		if args[i] == "help" {
+			i += 1
+			show_help = true
+			if !(i < len(args))  {
+				err = {.Help_Text, commands_help_text(args[0], commands)}
+				return
+			}
 		}
 		for c in commands {
 			if (c.name == args[i]) {
@@ -127,11 +139,14 @@ _parse_args_commands :: proc(
 			err =  {
 				.Invalid_Command,
 				fmt.tprintf(
-					"flag: command %#v not found\n%v",
+					"flag: command '%v' not found\n%v",
 					args[i],
 					commands_help_text(args[0], commands),
 				),
 			}
+			return
+		} else if (show_help) {
+			err = {.Help_Text, flags_help_text(args[0], command, flags)}
 			return
 		}
 		i += 1
@@ -199,7 +214,8 @@ _parse_args_commands :: proc(
 					name = arg
 					n = 2
 				}
-
+				
+				// -help
 				if name == "help" {
 					err = {.Help_Text, flags_help_text(args[0], command, flags)}
 					return
@@ -350,16 +366,32 @@ commands_help_text :: proc(
 	arg0: string,
 	commands: []Command($E),
 ) -> string where intrinsics.type_is_enum(E) {
+	exec_stem := filepath.stem(arg0) // executable file name
+
 	help: strings.Builder
 
 	strings.write_string(&help, "Usage:\n")
-	fmt.sbprintf(&help, "\t%v command [arguments]\n", arg0)
+	fmt.sbprintf(&help, "\t%v command [arguments]\n", exec_stem)
 
 	// todo: two passes are needed here to figure out the max width
 	strings.write_string(&help, "Commands:\n")
+	max_len: int
 	for cmd in commands {
-		fmt.sbprintf(&help, "\t%v\t%v\n", cmd.name, cmd.description)
+		max_len = max(max_len, len(cmd.name))
 	}
+	for cmd in commands {
+		strings.write_rune(&help, '\t')
+		strings.write_string(&help, cmd.name)
+		for i in 0..<(max_len-len(cmd.name))+4 {
+			strings.write_rune(&help, ' ')
+		}
+		strings.write_string(&help, cmd.description) // need to reflow if it spans more than 1 line because \t\t might not be enough
+		strings.write_rune(&help, '\n')
+	}
+
+	strings.write_rune(&help, '\n')
+	strings.write_string(&help, "For further details on a command, invoke command help:\n")
+	fmt.sbprintf(&help, "\t e.g. `%v %v -help` or `%v help %v`\n", exec_stem, commands[0].name, exec_stem, commands[0].name)
 
 	return strings.to_string(help)
 }
@@ -423,7 +455,7 @@ flags_help_text :: proc(
 				fmt.sbprintf(&help, "\t\tThe default is %v.\n", binding.string_^)
 			}
 		case Binding_Enum:
-            // todo: Binding_Custom
+			// todo: Binding_Custom
 			fmt.sbprintln(&help, "\t\tAvailable options:") // todo: if names?
 			names := binding->names()
 			for value in names {
@@ -504,12 +536,32 @@ Binding_Enum_Default_Proc :: #type proc(binding: Binding_Enum) -> (default: stri
 
 Binding_Enum :: struct {
 	using _:   Binding,
-	procedure: Binding_Enum_Parser_Proc,
-	enum_:     rawptr, // ^Enum_Type, ^bit_set[Enum_Type]
+	procedure: Binding_Enum_Parser_Proc, // parse
+	enum_:     rawptr, // data: ^Enum_Type, ^bit_set[Enum_Type]
 	rename:    runtime.Raw_Map, // map[string]Enum_Type
 	names:     Binding_Enum_Names_Proc,
 	default:   Binding_Enum_Default_Proc,
 	bit_set_:  bool,
+}
+
+@(private)
+_enum_parse :: proc($Enum_Type: typeid, binding: Binding_Enum, name: string) -> (value: Enum_Type, ok: bool) {
+	rename := transmute(map[string]Enum_Type)binding.rename
+	if rename != nil {
+		for key, value in rename {
+			if strings.equal_fold(name, key) {
+				return Enum_Type(value), true
+			}
+		}
+	} else {
+		value_names := reflect.enum_field_names(Enum_Type)
+		for value_name, i in value_names {
+			if strings.equal_fold(name, value_name) {
+				return Enum_Type(reflect.enum_field_values(Enum_Type)[i]), true
+			}
+		}
+	}
+	return {}, false
 }
 
 bind_enum :: proc(
@@ -522,25 +574,17 @@ bind_enum :: proc(
 bind_enum_rename :: proc(
 	enum_: ^$Enum_Type,
 	param := ":<string>",
-	rename: map[string]Enum_Type,
+	rename: map[string]Enum_Type, // todo: rename -> mapped?
 ) -> Binding_Enum where intrinsics.type_is_enum(Enum_Type) {
-	bind :: proc(binding: Binding_Enum, name: string) -> bool {
-		rename := transmute(map[string]Enum_Type)binding.rename
-		if rename != nil {
-			if value, ok := rename[name]; ok {
-				(^Enum_Type)(binding.enum_)^ = value
-				return true
-			} else {
-				return false
-			}
-		}
-		value := reflect.enum_from_name(Enum_Type, name) or_return
-		(^Enum_Type)(binding.enum_)^ = value
-		return true
-	}
 	binding: Binding_Enum
 	binding.param = param
-	binding.procedure = Binding_Enum_Parser_Proc(bind)
+	binding.procedure = proc(binding: Binding_Enum, name: string) -> bool {
+		if value, ok := _enum_parse(Enum_Type, binding, name); ok {
+			(^Enum_Type)(binding.enum_)^ = value
+			return true
+		}
+		return false
+	}
 	binding.enum_ = enum_
 	binding.rename = transmute(runtime.Raw_Map)rename
 	binding.names = proc (binding: Binding_Enum) -> []string {
@@ -590,33 +634,33 @@ bind_bit_set_rename :: proc(
 	param := ":<string>",
 	rename: map[string]Enum_Type
 ) -> Binding_Enum where intrinsics.type_is_bit_set(Bit_Set_Type) {
-	bind :: proc(binding: Binding_Enum, names: string) -> bool {
+	binding: Binding_Enum
+	binding.param = param
+	binding.procedure = proc(binding: Binding_Enum, names: string) -> bool {
 		// -flag:foo,bar,baz
 		// -flag:0,bar everything off except bar
 		// -flag:~0,-bar everything on except bar
-		rename := transmute(map[string]Enum_Type)binding.rename
 		for name in strings.split(names, ",", allocator = context.temp_allocator) {
 			name := name
 			switch {
+			case strings.has_prefix(name, "+"):
+				name = name[1:]
+				fallthrough
 			case:
-				name = name[1:] if strings.has_prefix(name, "+") else name
-				value := rename[name] if rename != nil else reflect.enum_from_name(Enum_Type, name) or_return
+				value := _enum_parse(Enum_Type, binding, name) or_return
 				(^Bit_Set_Type)(binding.enum_)^ += {value}
 			case strings.has_prefix(name, "-"):
 				name := name[1:]
-				value := rename[name] if rename != nil else reflect.enum_from_name(Enum_Type, name) or_return
+				value := _enum_parse(Enum_Type, binding, name) or_return
 				(^Bit_Set_Type)(binding.enum_)^ -= {value}
 			case name == "0":
 				(^Bit_Set_Type)(binding.enum_)^ = {}
 			case name == "~0":
-				(^Bit_Set_Type)(binding.enum_)^ = ~{}
+				(^Bit_Set_Type)(binding.enum_)^ = ~{} // note: this will set bits outside the enum
 			}
 		}
 		return true
 	}
-	binding: Binding_Enum
-	binding.param = param
-	binding.procedure = Binding_Enum_Parser_Proc(bind)
 	binding.enum_ = bit_set_
 	binding.rename = transmute(runtime.Raw_Map)rename
 	binding.names = proc (binding: Binding_Enum) -> []string {
@@ -663,7 +707,6 @@ bind_bit_set_rename :: proc(
 	return binding
 }
 
-// these could transform key=value pair as well; if they wanted to
 Binding_Map_Validator_Proc :: #type proc(key: string, val: string) -> (err: string)
 
 Binding_Map :: struct {

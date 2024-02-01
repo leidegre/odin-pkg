@@ -136,9 +136,9 @@ parse_args :: proc(
 main :: proc() {
 	build_context: Odin_Build_Context
 	
-	// defaults
+	// some defaults
 	build_context.optimization_level = Odin_Optimization_Level.Minimal 
-    build_context.sanitizer_flags += {.Address}
+	build_context.sanitizer_flags += {.Address}
 	build_context.max_error_count = 36
 	
 	fmt.println(parse_args(&build_context))
